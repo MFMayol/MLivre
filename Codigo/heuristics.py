@@ -1,6 +1,7 @@
 from typing import List, Tuple
 from collections import defaultdict
-from data_structures import Instance, Order, Runner
+from data_structures import Order, Runner
+from Instance import Instance
 
 def greedy_wave_selection(instance: Instance) -> Tuple[List[Order], List[Runner]]:
     """

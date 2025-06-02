@@ -1,10 +1,12 @@
 
-from data_structures import Instance, Order, Runner
+from data_structures import Order, Runner
 from gurobipy import Model, GRB, quicksum
+from Instance import Instance
 
 def exact_solution(instance: Instance) -> float:
     '''
     Descripción: Función que resuelve una instancia evaluando diferentes cantidades de corredores
+                 con límite de tiempo de 30 segundos por modelo
     
     Args:
         instance (Instance): Instancia del problema
@@ -14,9 +16,8 @@ def exact_solution(instance: Instance) -> float:
     '''
     orders = instance.orders
     runners = instance.runners
-    
-    lb = instance.lb
     ub = instance.ub
+    lb = instance.lb
 
     # Conjuntos usando índices originales
     O = {order.index for order in orders}
@@ -31,19 +32,22 @@ def exact_solution(instance: Instance) -> float:
     order_dict = {order.index: order for order in orders}
     runner_dict = {runner.index: runner for runner in runners}
 
-    # Calcular unidades totales posibles (para referencia)
-    total_units = sum(sum(order_dict[o].items.values()) for o in O)
-
     # Inicializar mejor solución
     mejor_ratio = 0.0
     mejor_k = 0
     mejor_unidades = 0
+    mejores_ordenes = []
+    mejores_corredores = []
 
     # Evaluar diferentes cantidades de corredores (k)
-    max_k = min(20, len(A))  # Máximo 20 corredores o todos los disponibles
+    max_k = min(5, len(A))  # Máximo 20 corredores o todos los disponibles
     
     for k in range(1, max_k + 1):  # Comenzar desde 1 (k=0 no puede servir órdenes)
         modelo = Model(f"Modelo_k_{k}")
+        
+        # Configurar límite de tiempo
+        modelo.setParam('TimeLimit', 30)
+        modelo.setParam('OutputFlag', False)
         
         # Variables de decisión
         x = modelo.addVars(O, vtype=GRB.BINARY, name="x_orden")
@@ -60,9 +64,12 @@ def exact_solution(instance: Instance) -> float:
         # Restricción de número de corredores
         modelo.addConstr(quicksum(y[a] for a in A) == k, name="runners_limit")
 
+
         # Restricción de ub y lb respecto a la mínima y maxima cantidad de items que se pueden llevar
         modelo.addConstr(quicksum(x[o] * order_dict[o].items.get(i,0) for o in O for i in I) <= ub)
         modelo.addConstr(quicksum(x[o] * order_dict[o].items.get(i,0) for o in O for i in I) >= lb)
+
+
 
 
         # Función objetivo: maximizar unidades servidas
@@ -74,12 +81,12 @@ def exact_solution(instance: Instance) -> float:
             ),
             GRB.MAXIMIZE
         )
-        
-        modelo.setParam('OutputFlag', False)
+
         modelo.optimize()
 
-        # Evaluar solución si es óptima
-        if modelo.status == GRB.OPTIMAL:
+        # Evaluar solución si se encontró alguna solución factible
+        if modelo.SolCount > 0:
+            # Obtener mejor solución encontrada (aunque no sea óptima)
             unidades_servidas = modelo.objVal
             ratio_actual = unidades_servidas / k
             
@@ -92,8 +99,17 @@ def exact_solution(instance: Instance) -> float:
                 # Guardar asignaciones de la mejor solución
                 mejores_ordenes = [o for o in O if x[o].x > 0.5]
                 mejores_corredores = [a for a in A if y[a].x > 0.5]
-            
-            print(f'Con pasillos {k} se alcanzan {unidades_servidas} unidades')
+                
+                # Informar progreso
+                status = "ÓPTIMO" if modelo.status == GRB.OPTIMAL else "FACTIBLE"
+                print(f"k={k}: Nuevo mejor ratio {ratio_actual:.2f} ({status})")
+            else:
+                # Informar solución encontrada pero no mejor
+                status = "ÓPTIMO" if modelo.status == GRB.OPTIMAL else "FACTIBLE"
+                print(f"k={k}: Solución {status} encontrada (ratio: {ratio_actual:.2f})")
+        else:
+            print(f"k={k}: No se encontró solución factible en 30 segundos")
+
         # Liberar recursos del modelo
         del modelo
 
@@ -117,4 +133,4 @@ def exact_solution(instance: Instance) -> float:
     
     print("="*50 + "\n")
     
-    return mejor_ratio
+    return mejor_ratio, mejores_ordenes, mejores_corredores

@@ -1,5 +1,6 @@
 from typing import List
-from data_structures import Order, Runner, Instance
+from data_structures import Order, Runner
+from Instance import Instance
 
 def read_instance(filepath: str) -> Instance:
     """
