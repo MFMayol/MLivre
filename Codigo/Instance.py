@@ -2,7 +2,6 @@ from data_structures import Order, Runner
 from collections import defaultdict
 from typing import Dict, List
 import copy
-#from Solucion import Solucion
 
 
 class Instance:
@@ -25,7 +24,7 @@ class Instance:
 
     def constructora(self): #Heurística Greedy de construcción de solución
         """
-        Construye una solución factible a partir de una instancia del problema.
+        Construye una solución factible a partir de una instancia del problema y luego aplica una heurística de asignación.
 
         Paso 1: Selecciona órdenes en orden decreciente de unidades hasta superar el LB.
         Paso 2: Selecciona corredores también en orden decreciente de capacidad,
@@ -36,6 +35,7 @@ class Instance:
 
         Returns:
             Solucion: Solución con las órdenes y corredores seleccionados.
+            asignacion: Diccionario con la asignación de órdenes a pasillos
         """
         LB = self.lb
 
@@ -71,8 +71,34 @@ class Instance:
             cubre_demanda = all(stock_disponible[i] >= demanda_total[i] for i in demanda_total)
             if cubre_demanda:
                 break
+            
+            # === Asignación de órdenes ===
+        asignacion = defaultdict(lambda: defaultdict(dict))
+        pasillos_seleccionados = copy.deepcopy(corredores_seleccionados)
+        stock_restante = {pasillo.index: pasillo.stock.copy() for pasillo in pasillos_seleccionados}
 
-        return Solucion(selected_orders=ordenes_seleccionadas, selected_runners= corredores_seleccionados, instance= self) #metodo constructora retorna un objeto Solucion
+        for order in ordenes_seleccionadas:
+            for item_id, demanda_item in order.items.items():
+                demanda_restante = demanda_item
+
+                for runner in corredores_seleccionados:
+                    runner_stock = stock_restante[runner.index].get(item_id, 0)
+                    if runner_stock <= 0:
+                        continue
+
+                    cantidad_asignada = min(runner_stock, demanda_restante)
+                    if cantidad_asignada > 0:
+                        asignacion[order.index][runner.index][item_id] = cantidad_asignada
+                        stock_restante[runner.index][item_id] -= cantidad_asignada
+                        demanda_restante -= cantidad_asignada
+
+                    if demanda_restante == 0:
+                        break
+
+                if demanda_restante > 0:
+                    raise ValueError(f"No hay stock suficiente para el ítem {item_id} de la orden {order.index}")
+
+        return Solucion(selected_orders=ordenes_seleccionadas, selected_runners= corredores_seleccionados, instance= self, asignacion = asignacion, stock_restante = stock_restante) #metodo constructora retorna un objeto Solucion y el diccionario de stock restante
 
 
 class Solucion:
@@ -83,11 +109,15 @@ class Solucion:
         selected_orders (List[Order]): Lista de órdenes seleccionadas para la solución.
         selected_runners (List[Runner]): Lista de corredores seleccionados para abastecer la demanda.
         instance (Instance): Instancia del problema.
+        asignacion (Dict): Diccionario de la forma Dict[order_id][runner_id][item_id] = cantidad_asignada
+        stock_restante (Dict) Diccionario de la forma Dict[runner_id][item_id] = cantidad
     """
-    def __init__(self, selected_orders: List[Order], selected_runners: List[Runner], instance : Instance):
+    def __init__(self, selected_orders: List[Order], selected_runners: List[Runner], instance : Instance, asignacion : Dict, stock_restante : Dict):
         self.selected_orders = selected_orders
         self.selected_runners = selected_runners
         self.instance = instance
+        self.asignacion = asignacion
+        self.stock_restante = stock_restante
 
     def total_units(self) -> int:
         """Retorna el total de unidades solicitadas por las órdenes seleccionadas."""
@@ -132,42 +162,72 @@ class Solucion:
         # ahora vemos si la cantidad de productos solicitados en las ordenes seleccionadas es mayor o igual que la cantidad de productos que se llevan en cada pasillo
         return all(stock_total[i] >= demanda_total[i] for i in demanda_total)
     
-    #Heurística de asignación de órdenes:
-    def asignar_ordenes(self) -> Dict[int, Dict[int, Dict[int, int]]]: # cuanto de cada item de cada orden va en cada pasillo
+    # Low level (evaluar si se pueden añadir órdenes con el stock restante)
+    def evaluar_stock_restante(self):
         """
-        Asigna los ítems de las órdenes seleccionadas a múltiples corredores si es necesario.
+        Intenta agregar órdenes no seleccionadas a la solución actual si hay suficiente stock y no se excede el UB.
 
         Returns:
-            Dict[order_id][runner_id][item_id] = cantidad_asignada
+            Solucion: Nuevo objeto Solucion con órdenes adicionales si es posible.
         """
-        asignacion = defaultdict(lambda: defaultdict(dict))
+        UB = self.instance.ub
+        ordenes_sobrantes = [orden for orden in self.instance.orders if orden not in set(self.selected_orders)] #deberian ser la 1,2,4
         
-        pasillos_seleccionados = copy.deepcopy(self.selected_runners)
-        stock_restante = {pasillo.index: pasillo.stock for pasillo in pasillos_seleccionados} #diccionario que copia el stock para ir revisando cada pasillo
+        nueva_asignacion = copy.deepcopy(self.asignacion)
+        nuevo_stock_restante = copy.deepcopy(self.stock_restante)
+        nuevas_ordenes = list(self.selected_orders) #no debería modificar lo original
+        unidades_actuales = sum(o.total_units for o in self.selected_orders)
         
-        for order in self.selected_orders: # recorremos cada orden de la solucion
-            for item_id, demanda_item in order.items.items(): # recorremos la tupla de (item, demanda) de cada orden
-                demanda_restante = demanda_item
+        for orden in ordenes_sobrantes:
+            if unidades_actuales + orden.total_units > UB: #nos saltamos las ordenes que vuelven infactible la solucion
+                continue 
+        
+            demanda_ok = True
+            stock_necesario = {} #stock de la orden
+            
+            for item, cantidad in orden.items.items(): #revisar para cada item de la orden si hay suficiente stock sobrante
+                cantidad_restante = cantidad # cantidad del item que se pide en la orden / al asignar en pasillos iremos restando (por eso es cantidad_restante)
+                stock_total = sum(nuevo_stock_restante[r.index].get(item, 0) for r in self.selected_runners) # sumamos la cantidad total de stock del item que estamos iterando dentro de los pasillos de la solución
+                if stock_total < cantidad_restante: # si no hay stock, rompemos el for y pasamos a una nueva orden
+                    demanda_ok = False
+                    break
+                
+                stock_necesario[item] = [] # diccionario de la forma {item(indice): [(corredor, unidades), (corredor, unidades)]}
+                for runner in self.selected_runners: # queremos recorrer los pasillos activos
+                    disponible = nuevo_stock_restante[runner.index].get(item, 0) #obtenemos la cantidad de stock disponible del item en cada pasillo (del ciclo)
+                    if disponible > 0: # si hay stock lo asignamos
+                        tomar = min(disponible, cantidad_restante) # asignamos lo maximo disponible (minimo entre disponible y demanda)
+                        stock_necesario[item].append((runner.index, tomar)) # guardamos la asignacion 
+                        cantidad_restante -= tomar # restamos de la demanda lo que asignamos en el pasillo
+                        if cantidad_restante == 0: # cuando terminamos de asignar el item rompemos el ciclo
+                            break
+                        
+                             
+            if not demanda_ok: # si demanda_ok = False pasamos a la siguiente orden
+                continue
+            
+            #Aplicamos la asignación:
+            for item, asignaciones in stock_necesario.items(): # recordar forma: {item(indice): [(corredor, unidades), (corredor, unidades)]}
+                for runner_id, cantidad in asignaciones: # actualizamos el diccionario de asignacion y de stock_restante
+                    nueva_asignacion[orden.index][runner_id][item] = cantidad
+                    nuevo_stock_restante[runner_id][item] -= cantidad
 
-                # Recorremos corredores hasta cumplir la demanda del ítem
-                for runner in self.selected_runners:
-                    runner_stock = stock_restante[runner.index].get(item_id, 0)
-                    if runner_stock <= 0:
-                        continue
-
-                    cantidad_asignada = min(runner_stock, demanda_restante)
-                    if cantidad_asignada > 0:
-                        asignacion[order.index][runner.index][item_id] = cantidad_asignada
-                        stock_restante[runner.index][item_id] -= cantidad_asignada
-                        demanda_restante -= cantidad_asignada
-
-                    if demanda_restante == 0:
-                        break
-
-                if demanda_restante > 0:
-                    raise ValueError(f"No hay stock suficiente para el ítem {item_id} de la orden {order.index}")
-
-        return asignacion
+        nuevas_ordenes.append(orden)
+        unidades_actuales += orden.total_units
+        
+        return Solucion(selected_orders=nuevas_ordenes, selected_runners=self.selected_runners, instance=self.instance, asignacion=nueva_asignacion, stock_restante=nuevo_stock_restante)
+        
+    
+        
+       
+              
+            
+        
+         
+        
+        
+        
+        
 
     # ahora creamos el print para que se vea mejor
     def __str__(self):
