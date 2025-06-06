@@ -22,47 +22,9 @@ class Instance:
         self.lb = lb
         self.ub = ub
         
-    def asignar_ordenes(self, ordenes_seleccionadas: List[Order], corredores_seleccionados: List[Runner]):
-        """
-        Realiza una asignación dada una solución encontrada del problema
-        
-        Args:
-        ordenes_seleccionadas: Lista de órdenes seleccionadas.
-        corredores_seleccionados: Lista de corredores seleccionados.
-        
-        Returns:
-        Tuple con:
-            - asignacion: Dict[order][runner][item] = cantidad_asignada
-            - stock_restante: Dict[runner][item] = stock restante después de la asignación
-    """
-        asignacion = defaultdict(lambda: defaultdict(dict))
-        pasillos_seleccionados = copy.deepcopy(corredores_seleccionados)
-        stock_restante = {pasillo.index: pasillo.stock.copy() for pasillo in pasillos_seleccionados}
-
-        for order in ordenes_seleccionadas:
-            for item_id, demanda_item in order.items.items():
-                demanda_restante = demanda_item
-
-                for runner in corredores_seleccionados:
-                    runner_stock = stock_restante[runner.index].get(item_id, 0)
-                    if runner_stock <= 0:
-                        continue
-
-                    cantidad_asignada = min(runner_stock, demanda_restante)
-                    if cantidad_asignada > 0:
-                        asignacion[order.index][runner.index][item_id] = cantidad_asignada
-                        stock_restante[runner.index][item_id] -= cantidad_asignada
-                        demanda_restante -= cantidad_asignada
-
-                    if demanda_restante == 0:
-                        break
-
-                if demanda_restante > 0:
-                    raise ValueError(f"No hay stock suficiente para el ítem {item_id} de la orden {order.index}")
-
-        return asignacion, stock_restante
-
-    def constructora(self): #Heurística Greedy de construcción de solución
+    
+    #Heurística Greedy de construcción de solución
+    def constructora(self): 
         """
         Construye una solución factible a partir de una instancia del problema y luego aplica una heurística de asignación.
 
@@ -111,10 +73,8 @@ class Instance:
             cubre_demanda = all(stock_disponible[i] >= demanda_total[i] for i in demanda_total)
             if cubre_demanda:
                 break
-            
-        asignacion, stock_restante = self.asignar_ordenes(ordenes_seleccionadas, corredores_seleccionados)
 
-        return Solucion(selected_orders=ordenes_seleccionadas, selected_runners= corredores_seleccionados, instance= self, asignacion = asignacion, stock_restante = stock_restante) #metodo constructora retorna un objeto Solucion y el diccionario de stock restante
+        return Solucion(selected_orders=ordenes_seleccionadas, selected_runners= corredores_seleccionados, instance= self) #metodo constructora retorna un objeto Solucion y el diccionario de stock restante
 
 
 class Solucion:
@@ -128,56 +88,93 @@ class Solucion:
         asignacion (Dict): Diccionario de la forma Dict[order_id][runner_id][item_id] = cantidad_asignada
         stock_restante (Dict) Diccionario de la forma Dict[runner_id][item_id] = cantidad
     """
-    def __init__(self, selected_orders: List[Order], selected_runners: List[Runner], instance : Instance, asignacion : Dict, stock_restante : Dict):
+    def __init__(self, selected_orders: List[Order], selected_runners: List[Runner], instance : Instance):
         self.selected_orders = selected_orders
         self.selected_runners = selected_runners
         self.instance = instance
-        self.asignacion = asignacion
-        self.stock_restante = stock_restante
+        self.asignacion, self.stock_restante = self.asignar_ordenes_y_stock_restante()
+        self.total_units = sum(order.total_units for order in selected_orders)
+        self.num_runners = len(selected_runners)
+        self.objective_value = self.set_objective_value()
+        self.is_factible = self.set_is_factible()
 
-    def total_units(self) -> int:
-        """Retorna el total de unidades solicitadas por las órdenes seleccionadas."""
-        return sum(order.total_units for order in self.selected_orders)
-
-    def num_runners(self) -> int:
-        """Retorna el número de corredores utilizados."""
-        return len(self.selected_runners)
-
-    def objective_value(self) -> float:
+    def set_objective_value(self) -> float:
         """
-        Retorna el valor objetivo de la solución: total de unidades / número de corredores.
-        Si no hay corredores, retorna 0.
+        Calcula el valor objetivo de la solución: total de unidades / número de corredores.
+
+        Returns:
+            float: Valor objetivo. Retorna 0 si no hay corredores.
         """
-        if self.num_runners() == 0:
+        if self.num_runners == 0:
             return 0
-        return self.total_units() / self.num_runners()
+        return self.total_units / self.num_runners
     
     # creamos método para ver si es factible o no
-    def is_factible(self) -> bool:
+    def set_is_factible(self) -> bool:
         """
-        Descripción: Método que verifica si la solución es factible considerando que la demanda total de productos por ítem es mayor o igual que la cantidad de productos que se llevan en cada pasillo.
-        Args:
-            None
+        Verifica si la solución es factible. Una solución es factible si la cantidad total
+        de productos disponibles en los corredores es suficiente para satisfacer la demanda
+        de las órdenes seleccionadas.
+
         Returns:
             bool: True si la solución es factible, False en caso contrario.
         """
-
-        # primero guardamos en un diccionario la cantidad de productos solicitados en las ordenes seleccionadas inicializandolas con 0 
-        demanda_total = {i:0 for i in range(self.instance.num_items)}
-        
+        demanda_total = {i: 0 for i in range(self.instance.num_items)}
         for order in self.selected_orders:
             for item, quantity in order.items.items():
                 demanda_total[item] = demanda_total.get(item, 0) + quantity
 
-        # ahora vemos la cantidad de productos que se llevan de cada uno en todos los pasillos en un diccionario
-        stock_total = {i:0 for i in range(self.instance.num_items)}
+        stock_total = {i: 0 for i in range(self.instance.num_items)}
         for runner in self.selected_runners:
             for item, quantity in runner.stock.items():
                 stock_total[item] = stock_total.get(item, 0) + quantity
 
-        # ahora vemos si la cantidad de productos solicitados en las ordenes seleccionadas es mayor o igual que la cantidad de productos que se llevan en cada pasillo
         return all(stock_total[i] >= demanda_total[i] for i in demanda_total)
     
+    def asignar_ordenes_y_stock_restante(self):
+        """
+        Realiza una asignación dada una solución encontrada del problema
+        
+        Args:
+        ordenes_seleccionadas: Lista de órdenes seleccionadas.
+        corredores_seleccionados: Lista de corredores seleccionados.
+        
+        Returns:
+        Tuple con:
+            - asignacion: Dict[order][runner][item] = cantidad_asignada
+            - stock_restante: Dict[runner][item] = stock restante después de la asignación
+    """
+        asignacion = defaultdict(lambda: defaultdict(dict))
+        pasillos_seleccionados = copy.deepcopy(self.selected_runners)
+        stock_restante = {pasillo.index: pasillo.stock.copy() for pasillo in pasillos_seleccionados}
+
+        for order in self.selected_orders:
+            for item_id, demanda_item in order.items.items():
+                demanda_restante = demanda_item
+
+                for runner in self.selected_runners:
+                    runner_stock = stock_restante[runner.index].get(item_id, 0)
+                    if runner_stock <= 0:
+                        continue
+
+                    cantidad_asignada = min(runner_stock, demanda_restante)
+                    if cantidad_asignada > 0:
+                        asignacion[order.index][runner.index][item_id] = cantidad_asignada
+                        stock_restante[runner.index][item_id] -= cantidad_asignada
+                        demanda_restante -= cantidad_asignada
+
+                    if demanda_restante == 0:
+                        break
+
+                if demanda_restante > 0: # si sobra demanda
+                    raise ValueError(f"No hay stock suficiente para el ítem {item_id} de la orden {order.index}")
+
+        return asignacion, stock_restante
+    
+    
+    
+    
+
     # Low level (evaluar si se pueden añadir órdenes con el stock restante)
     def evaluar_stock_restante(self):
         """
@@ -187,7 +184,7 @@ class Solucion:
             Solucion: Nuevo objeto Solucion con órdenes adicionales si es posible.
         """
         UB = self.instance.ub
-        ordenes_sobrantes = [orden for orden in self.instance.orders if orden not in set(self.selected_orders)] #deberian ser la 1,2,4
+        ordenes_sobrantes = [orden for orden in self.instance.orders if orden not in set(self.selected_orders)] 
         
         nueva_asignacion = copy.deepcopy(self.asignacion)
         nuevo_stock_restante = copy.deepcopy(self.stock_restante)
@@ -234,17 +231,6 @@ class Solucion:
         return Solucion(selected_orders=nuevas_ordenes, selected_runners=self.selected_runners, instance=self.instance, asignacion=nueva_asignacion, stock_restante=nuevo_stock_restante)
         
     
-        
-       
-              
-            
-        
-         
-        
-        
-        
-        
-
     # ahora creamos el print para que se vea mejor
     def __str__(self):
         return f"Solución con {len(self.selected_orders)} órdenes y {len(self.selected_runners)} corredores con un ratio de {self.objective_value():.2f}"
