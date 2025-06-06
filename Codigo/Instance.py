@@ -21,6 +21,46 @@ class Instance:
         self.num_items = num_items
         self.lb = lb
         self.ub = ub
+        
+    def asignar_ordenes(self, ordenes_seleccionadas: List[Order], corredores_seleccionados: List[Runner]):
+        """
+        Realiza una asignación dada una solución encontrada del problema
+        
+        Args:
+        ordenes_seleccionadas: Lista de órdenes seleccionadas.
+        corredores_seleccionados: Lista de corredores seleccionados.
+        
+        Returns:
+        Tuple con:
+            - asignacion: Dict[order][runner][item] = cantidad_asignada
+            - stock_restante: Dict[runner][item] = stock restante después de la asignación
+    """
+        asignacion = defaultdict(lambda: defaultdict(dict))
+        pasillos_seleccionados = copy.deepcopy(corredores_seleccionados)
+        stock_restante = {pasillo.index: pasillo.stock.copy() for pasillo in pasillos_seleccionados}
+
+        for order in ordenes_seleccionadas:
+            for item_id, demanda_item in order.items.items():
+                demanda_restante = demanda_item
+
+                for runner in corredores_seleccionados:
+                    runner_stock = stock_restante[runner.index].get(item_id, 0)
+                    if runner_stock <= 0:
+                        continue
+
+                    cantidad_asignada = min(runner_stock, demanda_restante)
+                    if cantidad_asignada > 0:
+                        asignacion[order.index][runner.index][item_id] = cantidad_asignada
+                        stock_restante[runner.index][item_id] -= cantidad_asignada
+                        demanda_restante -= cantidad_asignada
+
+                    if demanda_restante == 0:
+                        break
+
+                if demanda_restante > 0:
+                    raise ValueError(f"No hay stock suficiente para el ítem {item_id} de la orden {order.index}")
+
+        return asignacion, stock_restante
 
     def constructora(self): #Heurística Greedy de construcción de solución
         """
@@ -72,31 +112,7 @@ class Instance:
             if cubre_demanda:
                 break
             
-            # === Asignación de órdenes ===
-        asignacion = defaultdict(lambda: defaultdict(dict))
-        pasillos_seleccionados = copy.deepcopy(corredores_seleccionados)
-        stock_restante = {pasillo.index: pasillo.stock.copy() for pasillo in pasillos_seleccionados}
-
-        for order in ordenes_seleccionadas:
-            for item_id, demanda_item in order.items.items():
-                demanda_restante = demanda_item
-
-                for runner in corredores_seleccionados:
-                    runner_stock = stock_restante[runner.index].get(item_id, 0)
-                    if runner_stock <= 0:
-                        continue
-
-                    cantidad_asignada = min(runner_stock, demanda_restante)
-                    if cantidad_asignada > 0:
-                        asignacion[order.index][runner.index][item_id] = cantidad_asignada
-                        stock_restante[runner.index][item_id] -= cantidad_asignada
-                        demanda_restante -= cantidad_asignada
-
-                    if demanda_restante == 0:
-                        break
-
-                if demanda_restante > 0:
-                    raise ValueError(f"No hay stock suficiente para el ítem {item_id} de la orden {order.index}")
+        asignacion, stock_restante = self.asignar_ordenes(ordenes_seleccionadas, corredores_seleccionados)
 
         return Solucion(selected_orders=ordenes_seleccionadas, selected_runners= corredores_seleccionados, instance= self, asignacion = asignacion, stock_restante = stock_restante) #metodo constructora retorna un objeto Solucion y el diccionario de stock restante
 
@@ -147,14 +163,14 @@ class Solucion:
         """
 
         # primero guardamos en un diccionario la cantidad de productos solicitados en las ordenes seleccionadas inicializandolas con 0 
-        demanda_total = { i:0 for i in range(self.instance.num_items)}
+        demanda_total = {i:0 for i in range(self.instance.num_items)}
         
         for order in self.selected_orders:
             for item, quantity in order.items.items():
                 demanda_total[item] = demanda_total.get(item, 0) + quantity
 
         # ahora vemos la cantidad de productos que se llevan de cada uno en todos los pasillos en un diccionario
-        stock_total = { i:0 for i in range(self.instance.num_items)}
+        stock_total = {i:0 for i in range(self.instance.num_items)}
         for runner in self.selected_runners:
             for item, quantity in runner.stock.items():
                 stock_total[item] = stock_total.get(item, 0) + quantity
