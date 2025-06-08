@@ -14,6 +14,14 @@ class Order:
         self.items = items
         self.total_units = sum(self.items.values())
 
+    def __str__(self):
+        """
+        Representación en cadena de la orden.
+
+        Returns:
+            str: Cadena que representa la orden y sus ítems.
+        """
+        return f"Order {self.index}: {self.items} (Total units: {self.total_units})"
 
 
 class Runner:
@@ -28,6 +36,7 @@ class Runner:
     def __init__(self, index: int, stock: Dict[int, int]):
         self.index = index
         self.stock = stock
+        self.total_units = sum(self.stock.values())
 
     def can_fulfill(self, item_id: int, quantity: int) -> bool:
         """
@@ -41,6 +50,14 @@ class Runner:
             bool: True si el corredor puede cumplir con la cantidad solicitada, False en caso contrario.
         """
         return self.stock.get(item_id, 0) >= quantity
+    
+    def __str__(self):
+        """
+        Representación en cadena del corredor.
 
+        Returns:
+            str: Cadena que representa el corredor y su stock.
+        """
+        return f"Runner {self.index}: {self.stock}, Total units: {self.total_units})"
 
 
