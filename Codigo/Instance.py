@@ -24,7 +24,7 @@ class Instance:
         self.id_orders = tuple(order.index for order in orders)  # Ahora es una tupla
         self.id_runners = tuple(runner.index for runner in runners) # Ahora es una tupla
 
-    def constructora(self):
+    def constructora1(self):
         """
         Heurística Greedy que construye una solución factible.
         Paso 1: Selecciona órdenes en orden decreciente de unidades hasta superar el LB.
@@ -64,14 +64,18 @@ class Instance:
 
         # Itera sobre corredores hasta cubrir toda la demanda
         for corredor in corredores_ordenados:
+            corredores_seleccionados.append(corredor)  # Agrega el corredor a la selección
+            # Suma el stock del corredor al stock disponible total
             for item, qty in corredor.stock.items():
                 stock_disponible[item] += qty  # Acumula el stock del corredor
-            corredores_seleccionados.append(corredor)
-
+            
             # Verifica si el stock actual cubre toda la demanda
-            cubre_demanda = all(stock_disponible[i] >= demanda_total[i] for i in demanda_total)
-            if cubre_demanda:
-                break  # Sale si ya se cubrió toda la demanda
+            if all(stock_disponible[i] >= demanda_total[i] for i in demanda_total):
+                break
+            else:
+                continue  # Si no cubre la demanda, continúa con el siguiente corredor
+
+
 
         # Retorna una instancia de la solución construida
         return Solucion(
@@ -80,6 +84,74 @@ class Instance:
             instance=self
         )
     
+
+    def constructora2(self):
+        """
+        Heurística Greedy que construye una solución factible.
+        Paso 1: Selecciona órdenes en orden decreciente de unidades hasta superar el LB.
+        Paso 2: Selecciona corredores con mayor capacidad hasta cubrir la demanda total.
+
+        Returns:
+            Solucion: Objeto con las órdenes y corredores seleccionados.
+        """
+        LB = self.lb
+        UB = self.ub
+        promedio = (LB + UB) / 2  # Calcula el promedio entre LB y UB
+
+        # Ordena las órdenes en orden decreciente según la cantidad total de unidades
+        ordenes_ordenadas = sorted(self.orders, key=lambda o: o.total_units, reverse=False)
+
+        ordenes_seleccionadas = []  # Lista para almacenar las órdenes seleccionadas
+        total_unidades = 0  # Acumulador de unidades seleccionadas
+
+        # Itera sobre las órdenes hasta alcanzar o superar el LB
+        for orden in ordenes_ordenadas:
+            ordenes_seleccionadas.append(orden)
+            total_unidades += orden.total_units
+            if total_unidades > promedio:
+                break  # Sale del ciclo al superar el límite inferior
+
+        # Inicializa diccionario con demanda total por ítem (todos los ítems en 0)
+        demanda_total = {i: 0 for i in range(self.num_items)}
+
+        # Suma la demanda total por ítem de las órdenes seleccionadas
+        for orden in ordenes_seleccionadas:
+            for item, qty in orden.items.items():
+                demanda_total[item] += qty
+
+        # Ordena corredores por capacidad total disponible (suma de stock)
+        corredores_ordenados = sorted(self.runners, key=lambda r: sum(r.stock.values()), reverse=True)
+
+        corredores_seleccionados = []  # Lista de corredores que serán seleccionados
+        stock_disponible = {i: 0 for i in range(self.num_items)}  # Inicialización del stock total disponible
+
+        # Itera sobre corredores hasta cubrir toda la demanda
+        for corredor in corredores_ordenados:
+            corredores_seleccionados.append(corredor)  # Agrega el corredor a la selección
+            # Suma el stock del corredor al stock disponible total
+            for item, qty in corredor.stock.items():
+                stock_disponible[item] += qty  # Acumula el stock del corredor
+            
+            # Verifica si el stock actual cubre toda la demanda
+            if all(stock_disponible[i] >= demanda_total[i] for i in demanda_total):
+                break
+            else:
+                continue  # Si no cubre la demanda, continúa con el siguiente corredor
+
+
+
+        # Retorna una instancia de la solución construida
+        return Solucion(
+            selected_orders=ordenes_seleccionadas,
+            selected_runners=corredores_seleccionados,
+            instance=self
+        )
+
+
+
+
+
+
     def __str__(self):
         """
         Retorna una representación legible de la instancia actual.
@@ -140,6 +212,11 @@ class Solucion:
         for runner in self.selected_runners:
             for item, quantity in runner.stock.items():
                 stock_total[item] += quantity
+
+        
+        # verificamos si la solucion respespeta el lb y el ub respecto a los items totales
+        if self.total_units < self.instance.lb or self.total_units > self.instance.ub:
+            return False
 
         # Verifica si el stock cubre la demanda en todos los ítems
         return all(stock_total[i] >= demanda_total[i] for i in demanda_total)
@@ -223,10 +300,10 @@ class Solucion:
         self.total_units = sum(order.total_units for order in self.selected_orders)
         self.num_runners = len(self.selected_runners)
         self.objective_value = self.set_objective_value()
-        self.is_factible = self.set_is_factible()
         self.stock_disponible_por_item = self.determinar_stock_disponible_por_item()
         self.id_selected_orders = tuple(order.index for order in self.selected_orders)
         self.id_selected_runners = tuple(runner.index for runner in self.selected_runners)
+        self.is_factible = self.set_is_factible()
 
     def __str__(self):
         """
