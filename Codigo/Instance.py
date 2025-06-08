@@ -36,7 +36,7 @@ class Instance:
         LB = self.lb
 
         # Ordena las órdenes en orden decreciente según la cantidad total de unidades
-        ordenes_ordenadas = sorted(self.orders, key=lambda o: o.total_units, reverse=True)
+        ordenes_ordenadas = sorted(self.orders, key=lambda o: o.total_units, reverse=False)
 
         ordenes_seleccionadas = []  # Lista para almacenar las órdenes seleccionadas
         total_unidades = 0  # Acumulador de unidades seleccionadas
