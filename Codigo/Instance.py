@@ -220,6 +220,39 @@ class Solucion:
 
         # Verifica si el stock cubre la demanda en todos los ítems
         return all(stock_total[i] >= demanda_total[i] for i in demanda_total)
+    
+    def costo_infactible(self) -> float:
+        """
+        Devuelve la suma de los restantes que hacen a las restricciones infactibles
+        """
+        demanda_total = {i: 0 for i in range(self.instance.num_items)}  # Inicializa demanda total por ítem
+        for order in self.selected_orders:
+            for item, quantity in order.items.items():
+                demanda_total[item] += quantity
+
+        stock_total = {i: 0 for i in range(self.instance.num_items)}  # Inicializa stock total por ítem
+        for runner in self.selected_runners:
+            for item, quantity in runner.stock.items():
+                stock_total[item] += quantity
+
+        
+        # verificamos si la solucion respespeta el lb y el ub respecto a los items totales
+        if self.total_units < self.instance.lb:
+            k_1 = self.instance.lb - self.total_units
+        else:
+            k_1 = 0
+        
+        if self.total_units > self.instance.ub:
+            k_2 = self.total_units - self.instance.ub
+        else:
+            k_2 = 0
+        
+        k = []  
+        for i in demanda_total:
+            if stock_total[i] < demanda_total[i]:
+                k_i = demanda_total[i] - stock_total[i]
+                k.append(k_i)
+        return k_1+k_2+sum(k)
 
     def asignar_ordenes(self) -> Dict[int, Dict[int, Dict[int, int]]]:
         """
