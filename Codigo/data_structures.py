@@ -37,7 +37,7 @@ class Runner:
         self.index = index
         self.stock = stock
         self.total_units = sum(self.stock.values())
-
+        
     def can_fulfill(self, item_id: int, quantity: int) -> bool:
         """
         Verifica si el corredor puede abastecer una cantidad específica de un ítem.

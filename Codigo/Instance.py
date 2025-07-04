@@ -146,6 +146,20 @@ class Instance:
             selected_runners=corredores_seleccionados,
             instance=self
         )
+        
+    def constructora_vacia(self):
+        """
+        Construye una solución vacía: sin órdenes ni corredores.
+
+        Returns:
+            Solucion: Objeto vacío (0 órdenes, 0 corredores).
+        """
+        return Solucion(
+            selected_orders=[],
+            selected_runners=[],
+            instance=self
+        )
+
 
 
 
@@ -175,15 +189,27 @@ class Solucion:
         self.selected_orders = selected_orders
         self.selected_runners = selected_runners
         self.instance = instance
-        self.total_units = sum(order.total_units for order in selected_orders)  # Total de unidades entregadas
+        self.total_units_order = sum(order.total_units for order in selected_orders)  # Total de unidades entregadas en las órdenes
+        self.total_units_runner = sum(runner.total_units for runner in selected_runners) #Total de unidades entregadas en los Runners
+        self.diversity_runners = list({item_id for runner in selected_runners for item_id in runner.stock}) #Ítems usados en la solución en runners
+        self.diversity_orders = list({item_id for order in selected_orders for item_id in order.items}) #Ítems usados en la solución en órdenes
+        self.demanda_total_por_item = {i: 0 for i in range(self.instance.num_items)}  # Inicializa demanda total por ítem
+        for order in self.selected_orders:
+            for item, quantity in order.items.items():
+                self.demanda_total_por_item[item] += quantity
+                
+        self.stock_total_por_item = {i: 0 for i in range(self.instance.num_items)}  # Inicializa stock total por ítem
+        for runner in self.selected_runners:
+            for item, quantity in runner.stock.items():
+                self.stock_total_por_item[item] += quantity
+        
         self.num_runners = len(selected_runners)  # Número de corredores usados
+        self.num_orders = len(self.selected_orders) # Número de órdenes usadas
         self.objective_value = self.set_objective_value()  # Valor objetivo de la solución
         self.is_factible = self.set_is_factible()  # Factibilidad de la solución
         self.stock_disponible_por_item = self.determinar_stock_disponible_por_item()  # Stock disponible por ítem
         self.id_selected_orders = tuple(order.index for order in selected_orders)  # Tupla de índices de órdenes seleccionadas
         self.id_selected_runners = tuple(runner.index for runner in selected_runners)  # Tupla de índices de corredores seleccionados
-        
-
 
     def set_objective_value(self) -> float:
         """
@@ -194,7 +220,7 @@ class Solucion:
         """
         if self.num_runners == 0:
             return 0.0
-        return self.total_units / self.num_runners
+        return self.total_units_order / self.num_runners
 
     def set_is_factible(self) -> bool:
         """
@@ -215,11 +241,57 @@ class Solucion:
 
         
         # verificamos si la solucion respespeta el lb y el ub respecto a los items totales
-        if self.total_units < self.instance.lb or self.total_units > self.instance.ub:
+        if self.total_units_order < self.instance.lb or self.total_units_order > self.instance.ub:
             return False
 
         # Verifica si el stock cubre la demanda en todos los ítems
         return all(stock_total[i] >= demanda_total[i] for i in demanda_total)
+    
+    def costo_infactible(self) -> float:
+        """
+        Devuelve la suma de los restantes que hacen a las restricciones infactibles
+        """
+        # verificamos si la solucion respespeta el lb y el ub respecto a los items totales
+        if self.total_units_order < self.instance.lb:
+            k_1 = self.instance.lb - self.total_units_order
+        else:
+            k_1 = 0
+        
+        if self.total_units_order > self.instance.ub:
+            k_2 = self.total_units_order - self.instance.ub
+        else:
+            k_2 = 0
+        
+        k = []  
+        for i in self.demanda_total_por_item:
+            if self.stock_total_por_item[i] < self.demanda_total_por_item[i]:
+                k_i = self.demanda_total_por_item[i] - self.stock_total_por_item[i]
+                k.append(k_i)
+
+        return k_1+k_2+sum(k)
+    
+    def infesible_type(self) -> float:
+        """
+        Devuelve el tipo de infactibilidad
+        """
+        # verificamos si la solucion respespeta el lb y el ub respecto a los items totales
+        if self.total_units_order < self.instance.lb:
+            k_1 = "LB"
+        else:
+            k_1 = ""
+        
+        if self.total_units_order > self.instance.ub:
+            k_2 = "UB"
+        else:
+            k_2 = ""
+        
+        k = []  
+        for i in self.demanda_total_por_item:
+            if self.stock_total_por_item[i] < self.demanda_total_por_item[i]:
+                k_i = 1
+                k.append(k_i)
+
+        return [k_1, k_2, k]
 
     def asignar_ordenes(self) -> Dict[int, Dict[int, Dict[int, int]]]:
         """
@@ -297,7 +369,7 @@ class Solucion:
         """
         Actualiza los atributos de la solución después de realizar cambios en las órdenes o corredores seleccionados.
         """
-        self.total_units = sum(order.total_units for order in self.selected_orders)
+        self.total_units_order = sum(order.total_units for order in self.selected_orders)
         self.num_runners = len(self.selected_runners)
         self.objective_value = self.set_objective_value()
         self.stock_disponible_por_item = self.determinar_stock_disponible_por_item()
@@ -312,4 +384,4 @@ class Solucion:
         Returns:
             str: Descripción textual de la solución.
         """
-        return f"La solución escoje las ordenes {self.id_selected_orders} con un total de {self.total_units} unidades y los corredores {self.id_selected_runners} con un valor objetivo de {self.objective_value:.2f}."
+        return f"La solución escoje las ordenes {self.id_selected_orders} con un total de {self.total_units_order} unidades y los corredores {self.id_selected_runners} con un valor objetivo de {self.objective_value:.2f}."
